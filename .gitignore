@@ -1,0 +1,16 @@
+# Ignore log runtime data
+logs/nginx/access.log
+logs/nginx/error.log
+# Ignore mailpit source code
+mailpit/*
+# Ignore Docker / MySQL runtime data
+mysql/data/
+# Ignore Docker / opensearch runtime data
+opensearch/*
+# Ignore rabbitmq source code
+rabbitmq/*
+# Ignore Redis runtime data
+redis/data/
+# Ignore Magento source code
+src/*
+

@@ -3,13 +3,36 @@ set -e
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [ ! -f .env ] && [ -f .env.example ]; then
+  cp .env.example .env
+fi
+
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 bash scripts/gen-ssl.sh
 
-if [ -z "$(ls -A src/mydemo1 2>/dev/null)" ]; then
-  docker compose exec php-fpm bash -lc "composer create-project \
-    --repository-url=https://repo.magento.com/ \
-    magento/project-community-edition=2.4.8 \
-    /var/www/html/mydemo1"
+echo "Ensuring php-fpm is built and running..."
+docker compose up -d --no-deps --build php-fpm
+
+if [ -n "${MAGENTO_MARKETPLACE_PUBLIC:-}" ] && [ -n "${MAGENTO_MARKETPLACE_PRIVATE:-}" ]; then
+  docker compose exec php-fpm bash -lc "composer config --global http-basic.repo.magento.com ${MAGENTO_MARKETPLACE_PUBLIC} ${MAGENTO_MARKETPLACE_PRIVATE}"
+fi
+
+if ! docker compose exec php-fpm bash -lc '[ -f /var/www/html/mydemo1/bin/magento ]'; then
+  if docker compose exec php-fpm bash -lc '[ -f /var/www/html/mydemo1/composer.json ]'; then
+    echo "Installing Magento dependencies in /var/www/html/mydemo1..."
+    docker compose exec php-fpm bash -lc "cd /var/www/html/mydemo1 && composer install"
+  else
+    docker compose exec php-fpm bash -lc "composer create-project \
+      --repository-url=https://repo.magento.com/ \
+      magento/project-community-edition=2.4.8 \
+      /var/www/html/mydemo1"
+  fi
 fi
 
 docker compose exec php-fpm bash -lc "
@@ -47,8 +70,17 @@ cd /var/www/html/mydemo1 && bin/magento setup:install \
   --amqp-password=guest
 "
 
+echo "Fixing file permissions..."
 docker compose exec php-fpm bash -lc "
 cd /var/www/html/mydemo1 && \
+chown -R :0 . && \
+chmod -R g+w . && \
+chmod -R u+w var pub/static pub/media app/etc
+"
+
+docker compose exec php-fpm bash -lc "
+cd /var/www/html/mydemo1 && \
+bin/magento setup:di:compile && \
 bin/magento deploy:mode:set developer && \
 bin/magento cache:flush && \
 bin/magento indexer:reindex
