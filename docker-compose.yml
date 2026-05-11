@@ -1,0 +1,148 @@
+version: "3.9"
+
+services:
+  nginx:
+    image: nginx:1.26-alpine
+    container_name: nginx
+    depends_on:
+      - php-fpm
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./src/mydemo1:/var/www/html/mydemo1         # ← project 1
+      - ./src/mydemo2:/var/www/html/mydemo2         # ← project 2
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+    networks:
+      - magento
+
+  php-fpm:
+    build:
+      context: ./php-fpm
+    container_name: phpfpm
+    depends_on:
+      - db
+      - redis
+      - opensearch
+      - rabbitmq
+      - mailpit
+    volumes:
+      - ./src/mydemo1:/var/www/html/mydemo1         # ← project 1
+      - ./src/mydemo2:/var/www/html/mydemo2         # ← project 2
+      - ./php-fpm/php.ini:/usr/local/etc/php/conf.d/zz-custom.ini
+      - ./logs/php-fpm:/var/log/php
+    working_dir: /var/www/html
+    networks:
+      - magento
+
+  db:
+    image: mariadb:10.6
+    container_name: db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/conf.d:/etc/mysql/conf.d
+      - ./mysql/init:/docker-entrypoint-initdb.d   # ← add this
+    command:
+      - --max_allowed_packet=512M
+      - --innodb-buffer-pool-size=1G
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    networks:
+      - magento
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/data:/data
+    networks:
+      - magento
+
+  opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: opensearch
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "${OPENSEARCH_PORT}:9200"
+      - "9600:9600"
+    volumes:
+      - ./opensearch/data:/usr/share/opensearch/data
+    networks:
+      - magento
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "${RABBITMQ_UI_PORT}:15672"
+    volumes:
+      - ./rabbitmq:/var/lib/rabbitmq
+    networks:
+      - magento
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "${MAILPIT_UI_PORT}:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    volumes:
+      - ./mailpit:/data
+    networks:
+      - magento
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: phpmyadmin
+    depends_on:
+      - db
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${PMA_PORT}:80"
+    networks:
+      - magento
+
+  node:
+    image: node:20-alpine
+    container_name: node
+    tty: true
+    working_dir: /var/www/html
+    volumes:
+      - ./src:/var/www/html
+      - ./node:/opt/node
+    command: sh
+    networks:
+      - magento
+
+networks:
+  magento:
+    driver: bridge
